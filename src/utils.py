@@ -1,6 +1,41 @@
 from math import pi
+import time
 import torch
 import torch.nn as nn
+from typing import Dict, Any
+
+def get_gpu_memory_usage() -> float:
+    if torch.cuda.is_available():
+        return torch.cuda.max_memory_allocated() / (1024 ** 3)
+    return 0.0
+
+def measure_throughput(batch_size: int, seq_length: int, start_time: float) -> float:
+    total_tokens = batch_size * seq_length
+    elapsed_time = time.time() - start_time
+    return total_tokens / elapsed_time if elapsed_time > 0 else 0.0
+
+class MetricsTracker:
+    def __init__(self):
+        self.metrics: Dict[str, list] = {
+            'train_loss': [], 'val_loss': [],
+            'throughput': [], 'gpu_memory': []
+        }
+    
+    def update(self, metrics_dict: Dict[str, Any]) -> None:
+        for key, value in metrics_dict.items():
+            if key in self.metrics:
+                self.metrics[key].append(float(value))
+    
+    def get_latest(self, metric_name: str) -> float:
+        values = self.metrics.get(metric_name, [])
+        return values[-1] if values else 0.0
+    
+    def get_mean(self, metric_name: str, window_size: int = 100) -> float:
+        values = self.metrics.get(metric_name, [])
+        if not values:
+            return 0.0
+        window = values[-window_size:]
+        return sum(window) / len(window)
 
 def apply_rope(x, cos, sin):
     batch_size, num_heads, seq_len, head_dim = x.shape
