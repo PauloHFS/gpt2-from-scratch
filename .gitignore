@@ -1,0 +1,14 @@
+data/
+gutenberg/
+
+# python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.env
+*.venv
+.venv/
+env/
+venv/
+ENV/
