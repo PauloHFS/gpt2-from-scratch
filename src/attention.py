@@ -18,7 +18,7 @@ class MultiHeadSelfAttention(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.register_buffer('mask', torch.triu(torch.ones(context_length, context_length), diagonal=1))
 
-    def forward(self, x, kv_cache=None):
+    def forward(self, x, past_key=None, past_value=None, **kwargs):
         b, num_tokens = x.shape[:2]
         past_len = 0
 
@@ -30,8 +30,7 @@ class MultiHeadSelfAttention(nn.Module):
         keys = keys.view(b, num_tokens, self.num_heads, self.head_dim).transpose(1, 2)
         values = values.view(b, num_tokens, self.num_heads, self.head_dim).transpose(1, 2)
 
-        if kv_cache is not None:
-            past_key, past_value = kv_cache
+        if past_key is not None and past_value is not None:
             past_len = past_key.shape[2]
             keys = torch.cat([past_key, keys], dim=2)
             values = torch.cat([past_value, values], dim=2)
@@ -83,8 +82,7 @@ class GroupedQueryAttention(nn.Module):
         else:
             self.q_norm = self.k_norm = None
 
-    def forward(self, x, kv_cache=None):
-
+    def forward(self, x, cos=None, sin=None, mask=None, past_k=None, past_v=None, **kwargs):
         b, num_tokens = x.shape[:2]
         past_len = 0
 
@@ -93,15 +91,17 @@ class GroupedQueryAttention(nn.Module):
         values = self.W_value(x)  # (b, num_tokens, num_kv_groups * head_dim)
 
         queries = queries.view(b, num_tokens, self.num_heads, self.head_dim).transpose(1, 2)
-        
         keys = keys.view(b, num_tokens, self.num_kv_groups, self.head_dim).transpose(1, 2)
         values = values.view(b, num_tokens, self.num_kv_groups, self.head_dim).transpose(1, 2)
 
-        if kv_cache is not None:
-            past_key, past_value = kv_cache
-            past_len = past_key.shape[2]
-            keys = torch.cat([past_key, keys], dim=2)
-            values = torch.cat([past_value, values], dim=2)
+        if cos is not None and sin is not None:
+            queries = apply_rope(queries, cos, sin)
+            keys = apply_rope(keys, cos, sin)
+
+        if past_k is not None and past_v is not None:
+            past_len = past_k.shape[2]
+            keys = torch.cat([past_k, keys], dim=2)
+            values = torch.cat([past_v, values], dim=2)
 
         keys_expanded = keys.repeat_interleave(self.group_size, dim=1)
         values_expanded = values.repeat_interleave(self.group_size, dim=1)
@@ -123,8 +123,7 @@ class GroupedQueryAttention(nn.Module):
         context_vec = context_vec.contiguous().view(b, num_tokens, self.d_out)
         context_vec = self.out_proj(context_vec)
 
-        new_kv_cache = (keys, values)
-        return context_vec, new_kv_cache
+        return context_vec, (keys, values)
 
     def _slice_rope(self, tensor, start, length):
         if tensor is None:

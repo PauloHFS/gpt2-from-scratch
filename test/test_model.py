@@ -69,7 +69,7 @@ def test_transformerblock_with_mha_and_gqa(monkeypatch):
     assert new_cache2 is None
 
 
-def test_gpt_forward_raises_nameerror_due_to_bug(monkeypatch):
+def test_gpt_forward(monkeypatch):
     # Ensure attention classes won't block GPT construction
     monkeypatch.setattr(model, "MultiHeadSelfAttention", DummyMHA)
     monkeypatch.setattr(model, "GroupedQueryAttention", DummyGQA)
@@ -87,7 +87,7 @@ def test_gpt_forward_raises_nameerror_due_to_bug(monkeypatch):
     gpt = model.GPT(cfg)
     idx = torch.randint(0, cfg["vocab_size"], (2, 4), dtype=torch.long)
 
-    # Current implementation references an undefined variable `x` in forward,
-    # so calling forward should raise a NameError.
-    with pytest.raises(NameError):
-        _ = gpt(idx)
+    logits, cache = gpt(idx)
+    assert logits.shape == (2, 4, cfg["vocab_size"])
+    assert isinstance(cache, list)
+    assert len(cache) == cfg["n_layers"]
