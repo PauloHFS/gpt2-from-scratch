@@ -1,5 +1,5 @@
 {
-  "name": "LLMs From Scratch",
+  "name": "GPT2 From Scratch",
   "build": {
     "context": "..",
     "dockerfile": "Dockerfile"
