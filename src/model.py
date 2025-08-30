@@ -1,89 +1,205 @@
-from torch import nn
+from time import time
+from torch import (
+    Tensor,
+    no_grad,
+    tensor,
+    argmax,
+    arange,
+    cat,
+    device,
+    multinomial,
+    save,
+    softmax,
+    topk,
+    where,
+)
+from torch.cuda import is_available
+from torch.nn import Dropout, Embedding, Linear, Module, Sequential
+from torch.nn.functional import cross_entropy
+from torch.nn.utils import clip_grad_norm_
+from torch.optim import AdamW
+from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.utils.data import DataLoader
+from tqdm import tqdm
 
-from .attention import MultiHeadSelfAttention, GroupedQueryAttention
+from src.metrics import MetricsTracker
+from src.utils import measure_throughput, get_gpu_memory_usage
+from src.transformer_block import TransformerBlock
+from src.layers.layer_norm import LayerNorm
 
-class FeedForward(nn.Module):
-    def __init__(self, emb_dim, hidden_dim, drop_rate):
+
+class GPTModel(Module):
+    tok_emb: Embedding
+    pos_emb: Embedding
+    drop_emb: Dropout
+    trf_blocks: Sequential
+    final_norm: LayerNorm
+    out_head: Linear
+
+    def __init__(
+        self,
+        vocab_size: int,
+        emb_dim: int,
+        context_length: int,
+        drop_rate: float,
+        n_heads: int,
+        n_layers: int,
+        qkv_bias: bool,
+    ) -> None:
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(emb_dim, hidden_dim),
-            nn.GELU(),
-            nn.Linear(hidden_dim, emb_dim),
-            nn.Dropout(drop_rate),
+        self.tok_emb = Embedding(vocab_size, emb_dim)
+        self.pos_emb = Embedding(context_length, emb_dim)
+        self.drop_emb = Dropout(drop_rate)
+        self.trf_blocks = Sequential(
+            *[
+                TransformerBlock(emb_dim, context_length, n_heads, drop_rate, qkv_bias)
+                for _ in range(n_layers)
+            ]
         )
+        self.final_norm = LayerNorm(emb_dim)
+        self.out_head = Linear(emb_dim, vocab_size, False)
 
-    def forward(self, x):
-        return self.net(x)
-
-class TransformerBlock(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        
-        attention_type = config.get("attention_type", "mha")
-        
-        if attention_type == "gqa":
-            assert "num_kv_groups" in config, "A configuração deve incluir 'num_kv_groups' para GQA."
-            self.attention = GroupedQueryAttention(
-                d_in=config["emb_dim"],
-                num_heads=config["n_heads"],
-                num_kv_groups=config["num_kv_groups"]
-            )
-        else: # "mha"
-            self.attention = MultiHeadSelfAttention(
-                d_in=config["emb_dim"],
-                d_out=config["emb_dim"],
-                context_length=config["context_length"],
-                dropout=config["drop_rate"],
-                num_heads=config["n_heads"],
-                qkv_bias=config["qkv_bias"]
-            )
-        
-        hidden_dim = 4 * config["emb_dim"]
-        self.ffn = FeedForward(config["emb_dim"], hidden_dim, config["drop_rate"])
-        
-        self.ln1 = nn.LayerNorm(config["emb_dim"])
-        self.ln2 = nn.LayerNorm(config["emb_dim"])
-        
-    def forward(self, x, kv_cache=None):        
-        attn_output, new_kv_cache = self.attention(self.ln1(x), kv_cache=kv_cache)
-        
-        x = x + attn_output
-        
-        ffn_output = self.ffn(self.ln2(x))
-        x = x + ffn_output
-        
-        return x, new_kv_cache
-
-class GPT(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.config = config
-        
-        self.token_embedding = nn.Embedding(config["vocab_size"], config["emb_dim"])
-                
-        self.drop_emb = nn.Dropout(config["drop_rate"])
-        
-        self.transformer_blocks = nn.Sequential(
-            *[TransformerBlock(config) for _ in range(config["n_layers"])]
-        )
-        
-        self.final_ln = nn.LayerNorm(config["emb_dim"])
-        
-        self.lm_head = nn.Linear(config["emb_dim"], config["vocab_size"], bias=False)
-        
-
-    def forward(self, idx, kv_cache=None):
-        x = self.token_embedding(idx)
+    def foward(self, in_idx: Tensor) -> Tensor:
+        _, seq_len = in_idx.shape
+        tok_embeds = self.tok_emb(in_idx)
+        pos_embeds = self.pos_emb(arange(seq_len, device=in_idx.device))
+        x = tok_embeds + pos_embeds
         x = self.drop_emb(x)
-        
-        if kv_cache is None:
-            kv_cache = [None] * len(self.transformer_blocks)
-        
-        for i, block in enumerate(self.transformer_blocks):
-            x, new_cache = block(x, kv_cache[i])
-            kv_cache[i] = new_cache
-        
-        x = self.final_ln(x)
-        logits = self.lm_head(x)
-        
-        return logits, kv_cache
+        x = self.trf_blocks(x)
+        x = self.final_norm(x)
+        logits = self.out_head(x)
+        return logits
+
+    def _validate_model(
+        model: "GPTModel", val_loader: DataLoader[Tensor], device_str: str
+    ) -> float:
+        with no_grad():
+            val_loss = 0.0
+            n_batches = 0
+
+            for input_ids, target_ids in val_loader:
+                input_ids: Tensor = input_ids.to(device_str)
+                target_ids: Tensor = target_ids.to(device_str)
+
+                logits: Tensor = model(input_ids)
+                loss = cross_entropy(
+                    logits.view(-1, logits.size(-1)), target_ids.view(-1)
+                )
+
+                val_loss += loss.item()
+                n_batches += 1
+
+            return val_loss / n_batches
+
+    def _train(
+        model: "GPTModel",
+        train_loader: DataLoader[Tensor],
+        val_loader: DataLoader[Tensor],
+        device_str: str = "cuda" if is_available() else "cpu",
+        learning_rate: float = 3e-4,
+        epochs: int = 1,
+        grand_clip: float = 1.0,
+        val_interval: int = 200,
+    ) -> tuple["GPTModel", MetricsTracker]:
+
+        print(f"Training model on device: {device_str}")
+
+        optimizer = AdamW(model.parameters(), lr=learning_rate, weight_decay=0.1)
+        scheduler = CosineAnnealingLR(optimizer, T_max=epochs)
+
+        metrics = MetricsTracker()
+
+        model = model.to(device_str)
+        model.train()
+
+        global_step = 0
+        best_val_loss = float("inf")
+
+        for epoch in tqdm(range(epochs)):
+            for _, (input_ids, target_ids) in enumerate(train_loader):
+                step_start = time()
+
+                input_ids: Tensor = input_ids.to(device_str)
+                target_ids: Tensor = target_ids.to(device_str)
+
+                logits: Tensor = model(input_ids)
+                loss = cross_entropy(
+                    logits.view(-1, logits.size(-1)), target_ids.view(-1)
+                )
+
+                optimizer.zero_grad()
+                loss.backward()
+
+                if grand_clip > 0.0:
+                    clip_grad_norm_(model.parameters(), grand_clip)
+
+                optimizer.step()
+
+                metrics.train_loss.append(loss.item())
+                metrics.throughput.append(
+                    measure_throughput(input_ids.size(0), input_ids.size(1), step_start)
+                )
+                metrics.gpu_memory.append(get_gpu_memory_usage())
+
+                if global_step > 0 and global_step % val_interval == 0:
+                    model.eval()
+                    val_metrics = GPTModel._validate_model(
+                        model, val_loader, device_str
+                    )
+                    metrics.val_loss.append(val_metrics)
+
+                    tqdm.write(f"Epoch {epoch + 1}/{epochs} - ")
+                    tqdm.write(f"Train Loss: {metrics.train_loss[-100:]:.4f}, ")
+                    tqdm.write(f"Val Loss {metrics.val_loss[-1]:.4f}, ")
+                    tqdm.write(f"Throughput: {metrics.throughput[-1]:.1f} tokens / sec")
+
+                    if val_metrics < best_val_loss:
+                        best_val_loss = val_interval
+                        save(model.state_dict(), "best_model.pt")
+
+                    model.train()
+
+                global_step += 1
+
+            scheduler.step()
+
+        return model, metrics
+
+    def generate(
+        self,
+        idx: Tensor,
+        max_new_tokens: int,
+        context_size: int,
+        temperature: float = 0.0,
+        top_k: int = 0,
+        eos_id: int = 0,
+    ) -> Tensor:
+
+        device("cuda" if is_available() else "cpu")
+
+        for _ in range(max_new_tokens):
+            idx_cond = idx[:, -context_size:]
+            with no_grad():
+                logits: Tensor = self(idx_cond)
+            logits = logits[:, -1, :]
+
+            if top_k:
+                top_logits, _ = topk(logits, top_k)
+                min_val = top_logits[:, -1]
+                logits = where(
+                    logits < min_val, tensor(float("-inf")).to(logits.device), logits
+                )
+
+            if temperature > 0.0:
+                logits = logits / temperature
+                probs = softmax(logits, dim=-1)
+                idx_next = multinomial(probs, num_samples=1)
+            else:
+                idx_next = argmax(logits, dim=-1, keepdim=True)
+
+            if idx_next == eos_id:
+                break
+
+            idx = cat((idx, idx_next), dim=1)
+
+        return idx
