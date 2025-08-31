@@ -1,9 +1,9 @@
 from torch import Tensor
 from torch.nn import Module, Dropout
 
-from src.layers.feed_foward import FeedFoward
-from src.layers.layer_norm import LayerNorm
-from src.multi_head_attention import MultiHeadAttention
+from src.gptmodel.layers.feed_foward import FeedFoward
+from src.gptmodel.layers.layer_norm import LayerNorm
+from src.gptmodel.multi_head_attention import MultiHeadAttention
 
 
 class TransformerBlock(Module):

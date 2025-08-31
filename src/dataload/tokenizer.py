@@ -6,7 +6,7 @@ from tqdm import tqdm
 from re import sub
 
 from src.settings import Settings
-from src.dataset import GPTDataset
+from src.dataload.dataset import GPTDataset
 
 
 class Tokenizer:
