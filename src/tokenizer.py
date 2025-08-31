@@ -5,8 +5,8 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 from re import sub
 
-from settings import Settings
-from dataset import GPTDataset
+from src.settings import Settings
+from src.dataset import GPTDataset
 
 
 class Tokenizer:

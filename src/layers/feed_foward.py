@@ -1,7 +1,7 @@
 from torch import Tensor
 from torch.nn import Module, Linear, Sequential
 
-from layers.gelu import GELU
+from src.layers.gelu import GELU
 
 
 class FeedFoward(Module):
