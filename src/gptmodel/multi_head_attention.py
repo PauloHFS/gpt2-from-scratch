@@ -40,7 +40,7 @@ class MultiHeadAttention(Module):
             "mask", triu(ones(context_length, context_length), diagonal=1)
         )
 
-    def foward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         b, num_tokens, _ = x.shape
 
         keys: Tensor = self.W_key(x)

@@ -59,7 +59,7 @@ class GPTModel(Module):
         self.final_norm = LayerNorm(emb_dim)
         self.out_head = Linear(emb_dim, vocab_size, False)
 
-    def foward(self, in_idx: Tensor) -> Tensor:
+    def forward(self, in_idx: Tensor) -> Tensor:
         _, seq_len = in_idx.shape
         tok_embeds = self.tok_emb(in_idx)
         pos_embeds = self.pos_emb(arange(seq_len, device=in_idx.device))
@@ -100,6 +100,7 @@ class GPTModel(Module):
         epochs: int = 1,
         grand_clip: float = 1.0,
         val_interval: int = 200,
+        path: str = "bestmodel.pt",
     ) -> tuple["GPTModel", MetricsTracker]:
 
         print(f"Training model on device: {device_str}")
@@ -155,7 +156,7 @@ class GPTModel(Module):
 
                     if val_metrics < best_val_loss:
                         best_val_loss = val_interval
-                        save(model.state_dict(), "best_model.pt")
+                        save(model.state_dict(), path)
 
                     model.train()
 

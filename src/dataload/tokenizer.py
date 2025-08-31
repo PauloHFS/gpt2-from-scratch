@@ -1,7 +1,7 @@
 from os import listdir
 from tiktoken import get_encoding, Encoding
 from torch import Tensor, tensor
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 from re import sub
 
@@ -93,7 +93,7 @@ class Tokenizer:
         file_paths = listdir(data_set_dir)
 
         for file_path in tqdm(file_paths):
-            content_brute = self.__read_content_path(file_path)
+            content_brute = self.__read_content_path(f"{data_set_dir}{file_path}")
             content_single_blank = sub(r"\n\s*\n", "\n\n", content_brute)
             current_content.append(content_single_blank)
 

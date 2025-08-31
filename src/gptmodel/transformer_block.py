@@ -35,7 +35,7 @@ class TransformerBlock(Module):
         self.norm2 = LayerNorm(emb_dim)
         self.drop_shortcut = Dropout(drop_rate)
 
-    def foward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         shortcut = x
         x = self.norm1(x)
         x = self.att(x)

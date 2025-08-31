@@ -14,7 +14,7 @@ class LayerNorm(Module):
         self.scale = Parameter(ones(emb_dim))
         self.shift = Parameter(zeros(emb_dim))
 
-    def foward(self, x: Tensor):
+    def forward(self, x: Tensor):
         mean = x.mean(dim=-1, keepdim=True)
         var = x.var(dim=-1, keepdim=True, unbiased=False)
         norm_x = (x - mean) / sqrt(var + self.ep5)
