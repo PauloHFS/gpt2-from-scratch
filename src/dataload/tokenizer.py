@@ -112,4 +112,4 @@ class Tokenizer:
     def token_ids_to_text(self, token_ids: Tensor) -> str:
         flat = token_ids.squeeze(0).tolist()
         texts = self.tokenizer.decode(flat)
-        return " ".join(texts)
+        return "".join(texts)
