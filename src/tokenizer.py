@@ -1,13 +1,12 @@
 from os import listdir
-from os.path import exists, join
 from tiktoken import get_encoding, Encoding
 from torch import Tensor, tensor
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 from re import sub
 
-from src.settings import Settings
-from src.dataset import GPTDataset
+from settings import Settings
+from dataset import GPTDataset
 
 
 class Tokenizer:

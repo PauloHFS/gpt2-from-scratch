@@ -22,10 +22,10 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from src.metrics import MetricsTracker
-from src.utils import measure_throughput, get_gpu_memory_usage
-from src.transformer_block import TransformerBlock
-from src.layers.layer_norm import LayerNorm
+from metrics import MetricsTracker
+from utils import measure_throughput, get_gpu_memory_usage
+from transformer_block import TransformerBlock
+from layers.layer_norm import LayerNorm
 
 
 class GPTModel(Module):

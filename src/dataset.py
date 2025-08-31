@@ -2,7 +2,7 @@ from tiktoken import Encoding
 from torch import Tensor, tensor
 from torch.utils.data import Dataset
 
-from src.settings import Settings
+from settings import Settings
 
 
 class GPTDataset(Dataset):
