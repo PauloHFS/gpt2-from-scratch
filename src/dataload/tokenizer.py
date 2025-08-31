@@ -1,6 +1,7 @@
 from os import listdir
 from tiktoken import get_encoding, Encoding
 from torch import Tensor, tensor
+from torch.cuda import is_available
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from re import sub
@@ -101,10 +102,12 @@ class Tokenizer:
             with open(target_path, "w", encoding="utf-8") as f:
                 f.write(Settings.end_of_tokens.join(current_content))
 
-    def text_to_token_ids(self, text: str) -> Tensor:
+    def text_to_token_ids(
+        self, text: str, device_type: str = "cuda" if is_available() else "cpu"
+    ) -> Tensor:
         enconded = self.tokenizer.encode(text)
         enconded_tensor = tensor(enconded).unsqueeze(0)
-        return enconded_tensor
+        return enconded_tensor.to(device_type)
 
     def token_ids_to_text(self, token_ids: Tensor) -> str:
         flat = token_ids.squeeze(0).tolist()

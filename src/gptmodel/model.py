@@ -57,7 +57,7 @@ class GPTModel(Module):
             ]
         )
         self.final_norm = LayerNorm(emb_dim)
-        self.out_head = Linear(emb_dim, vocab_size, False)
+        self.out_head = Linear(emb_dim, vocab_size, bias=False)
 
     def forward(self, in_idx: Tensor) -> Tensor:
         _, seq_len = in_idx.shape
@@ -117,7 +117,7 @@ class GPTModel(Module):
         best_val_loss = float("inf")
 
         for epoch in tqdm(range(epochs)):
-            for _, (input_ids, target_ids) in enumerate(train_loader):
+            for batch_idx, (input_ids, target_ids) in enumerate(train_loader):
                 step_start = time()
 
                 input_ids: Tensor = input_ids.to(device_str)
@@ -149,8 +149,12 @@ class GPTModel(Module):
                     )
                     metrics.val_loss.append(val_metrics)
 
-                    tqdm.write(f"Epoch {epoch + 1}/{epochs} - ")
-                    tqdm.write(f"Train Loss: {metrics.train_loss[-100:]:.4f}, ")
+                    tqdm.write(
+                        f"Epoch {epoch + 1}/{epochs} | Batch {batch_idx} / {len(train_loader)} - "
+                    )
+                    tqdm.write(
+                        f"Train Loss: {sum(metrics.train_loss[-100:])/len(metrics.train_loss[-100:]):.4f}, "
+                    )
                     tqdm.write(f"Val Loss {metrics.val_loss[-1]:.4f}, ")
                     tqdm.write(f"Throughput: {metrics.throughput[-1]:.1f} tokens / sec")
 

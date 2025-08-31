@@ -1,5 +1,6 @@
 from tiktoken import Encoding
-from torch import Tensor, tensor
+from torch import Tensor, tensor, device
+from torch.cuda import is_available
 from torch.utils.data import Dataset
 
 from src.settings import Settings
@@ -11,6 +12,7 @@ class GPTDataset(Dataset):
     target_ids: list[Tensor]
 
     def __init__(self, txt: str, tokenizer: Encoding, max_length: int, stride: int):
+        device("cuda" if is_available() else "cpu")
         self.input_ids = list()
         self.target_ids = list()
 
