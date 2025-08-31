@@ -61,8 +61,8 @@ class GPTModel(Module):
 
     def forward(self, in_idx: Tensor) -> Tensor:
         _, seq_len = in_idx.shape
-        tok_embeds = self.tok_emb(in_idx)
-        pos_embeds = self.pos_emb(arange(seq_len, device=in_idx.device))
+        tok_embeds: Tensor = self.tok_emb(in_idx)
+        pos_embeds: Tensor = self.pos_emb(arange(seq_len, device=in_idx.device))
         x = tok_embeds + pos_embeds
         x = self.drop_emb(x)
         x = self.trf_blocks(x)
