@@ -91,84 +91,85 @@ class GPTModel(Module):
 
             return val_loss / n_batches
 
-    def _train(
-        model: "GPTModel",
-        train_loader: DataLoader[Tensor],
-        val_loader: DataLoader[Tensor],
-        device_str: str = "cuda" if is_available() else "cpu",
-        learning_rate: float = 3e-4,
-        epochs: int = 1,
-        grand_clip: float = 1.0,
-        val_interval: int = 200,
-        path: str = "bestmodel.pt",
-    ) -> tuple["GPTModel", MetricsTracker]:
+def _train(
+    model: "GPTModel",
+    train_loader: DataLoader[Tensor],
+    val_loader: DataLoader[Tensor],
+    device_str: str = "cuda" if is_available() else "cpu",
+    learning_rate: float = 3e-4,
+    epochs: int = 1,
+    grand_clip: float = 1.0,
+    val_interval: int = 200,
+    path: str = "bestmodel.pt",
+) -> tuple["GPTModel", MetricsTracker]:
 
-        print(f"Training model on device: {device_str}")
+    print(f"Training model on device: {device_str}")
 
-        optimizer = AdamW(model.parameters(), lr=learning_rate, weight_decay=0.1)
-        scheduler = CosineAnnealingLR(optimizer, T_max=epochs)
+    optimizer = AdamW(model.parameters(), lr=learning_rate, weight_decay=0.1)
+    # T_max deve ser o número total de passos se o scheduler for por passo
+    # ou épocas se for por época. A correção abaixo assume atualização por época.
+    scheduler = CosineAnnealingLR(optimizer, T_max=epochs)
 
-        metrics = MetricsTracker()
+    metrics = MetricsTracker()
 
-        model = model.to(device_str)
-        model.train()
+    model = model.to(device_str)
 
-        global_step = 0
-        best_val_loss = float("inf")
+    global_step = 0
+    best_val_loss = float("inf")
 
-        for epoch in tqdm(range(epochs)):
-            for batch_idx, (input_ids, target_ids) in enumerate(train_loader):
-                step_start = time()
+    for epoch in tqdm(range(epochs)):
+        model.train() # Garante que o modelo está em modo de treino no início da época
+        for batch_idx, (input_ids, target_ids) in enumerate(train_loader):
+            step_start = time()
 
-                input_ids: Tensor = input_ids.to(device_str)
-                target_ids: Tensor = target_ids.to(device_str)
+            input_ids: Tensor = input_ids.to(device_str)
+            target_ids: Tensor = target_ids.to(device_str)
 
-                logits: Tensor = model(input_ids)
-                loss = cross_entropy(
-                    logits.view(-1, logits.size(-1)), target_ids.view(-1)
+            logits: Tensor = model(input_ids)
+            loss = cross_entropy(
+                logits.view(-1, logits.size(-1)), target_ids.view(-1)
+            )
+
+            optimizer.zero_grad()
+            loss.backward()
+
+            if grand_clip > 0.0:
+                clip_grad_norm_(model.parameters(), grand_clip)
+
+            optimizer.step()
+
+            metrics.train_loss.append(loss.item())
+            metrics.throughput.append(
+                measure_throughput(input_ids.size(0), input_ids.size(1), step_start)
+            )
+            metrics.gpu_memory.append(get_gpu_memory_usage())
+
+            if global_step > 0 and global_step % val_interval == 0:
+                model.eval()
+                val_metrics = GPTModel._validate_model(
+                    model, val_loader, device_str
+                )
+                metrics.val_loss.append(val_metrics)
+
+                tqdm.write(
+                    f"Epoch {epoch + 1}/{epochs} | Step {global_step} - "
+                    f"Train Loss: {sum(metrics.train_loss[-100:])/len(metrics.train_loss[-100:]):.4f}, "
+                    f"Val Loss {val_metrics:.4f}, "
+                    f"Throughput: {metrics.throughput[-1]:.1f} tokens / sec"
                 )
 
-                optimizer.zero_grad()
-                loss.backward()
+                if val_metrics < best_val_loss:
+                    best_val_loss = val_metrics
+                    save(model.state_dict(), path)
+                    tqdm.write(f"New best model saved to {path} with val_loss: {best_val_loss:.4f}")
 
-                if grand_clip > 0.0:
-                    clip_grad_norm_(model.parameters(), grand_clip)
+                model.train()
 
-                optimizer.step()
+            global_step += 1
+        
+        scheduler.step()
 
-                metrics.train_loss.append(loss.item())
-                metrics.throughput.append(
-                    measure_throughput(input_ids.size(0), input_ids.size(1), step_start)
-                )
-                metrics.gpu_memory.append(get_gpu_memory_usage())
-
-                if global_step > 0 and global_step % val_interval == 0:
-                    model.eval()
-                    val_metrics = GPTModel._validate_model(
-                        model, val_loader, device_str
-                    )
-                    metrics.val_loss.append(val_metrics)
-
-                    tqdm.write(
-                        f"Epoch {epoch + 1}/{epochs} | Batch {batch_idx} / {len(train_loader)} - "
-                    )
-                    tqdm.write(
-                        f"Train Loss: {sum(metrics.train_loss[-100:])/len(metrics.train_loss[-100:]):.4f}, "
-                    )
-                    tqdm.write(f"Val Loss {metrics.val_loss[-1]:.4f}, ")
-                    tqdm.write(f"Throughput: {metrics.throughput[-1]:.1f} tokens / sec")
-
-                    if val_metrics < best_val_loss:
-                        best_val_loss = val_interval
-                        save(model.state_dict(), path)
-
-                    model.train()
-
-                global_step += 1
-
-            scheduler.step()
-
-        return model, metrics
+    return model, metrics
 
     def generate(
         self,
