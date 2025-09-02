@@ -29,5 +29,18 @@
         "qkv_bias": false,
         "attention_type": "gqa",
         "num_kv_groups": 4
+    },
+    "GQA_CONFIG": {
+        "vocab_size": 50257,           
+        "context_length": 256,        
+        "emb_dim": 256,                 
+        "n_heads": 12,                   
+        "n_layers": 12,                  
+        "hidden_dim": 768,             
+        "head_dim": 256,                 
+        "qk_norm": true,                 
+        "n_kv_groups": 4,                
+        "rope_base": 1000000.0,       
+        "dtype": "torch.bfloat16"
     }
 }
